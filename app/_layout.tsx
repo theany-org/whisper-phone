@@ -1,24 +1,28 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import "@/crypto/polyfill";
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useEffect } from "react";
+import { Slot } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import "react-native-reanimated";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+import "../global.css";
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+import { useAuthStore } from "@/store/authStore";
+import { useServerStore } from "@/store/serverStore";
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  const hydrateAuth = useAuthStore((s) => s.hydrate);
+  const hydrateServer = useServerStore((s) => s.hydrate);
+
+  useEffect(() => {
+    // Load server URL first, then auth (auth needs the correct server URL)
+    hydrateServer().then(() => hydrateAuth());
+  }, []);
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <KeyboardProvider>
+      <Slot />
+      <StatusBar style="light" />
+    </KeyboardProvider>
   );
 }
