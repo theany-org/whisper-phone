@@ -26,6 +26,12 @@ export interface InboundWireMessage {
   timestamp: number;
 }
 
+export interface ReplyInfo {
+  id: string;
+  text: string;
+  from: string;
+}
+
 /** Decrypted message for UI display */
 export interface ChatMessage {
   id: string;
@@ -35,6 +41,7 @@ export interface ChatMessage {
   timestamp: number;
   isMine: boolean;
   status: "sending" | "sent" | "failed";
+  replyTo?: ReplyInfo;
 }
 
 export interface Conversation {

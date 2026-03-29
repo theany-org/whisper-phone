@@ -114,12 +114,20 @@ export default function ConversationsScreen() {
               </Text>
             </View>
           </View>
-          <Pressable
-            onPress={logout}
-            className="bg-neutral-900 px-4 py-2 rounded-lg active:bg-neutral-800"
-          >
-            <Text className="text-red-400 text-sm font-medium">Logout</Text>
-          </Pressable>
+          <View className="flex-row gap-2">
+            <Pressable
+              onPress={() => router.push("/(chat)/settings")}
+              className="bg-neutral-900 px-4 py-2 rounded-lg active:bg-neutral-800"
+            >
+              <Text className="text-neutral-400 text-sm font-medium">⚙</Text>
+            </Pressable>
+            <Pressable
+              onPress={logout}
+              className="bg-neutral-900 px-4 py-2 rounded-lg active:bg-neutral-800"
+            >
+              <Text className="text-red-400 text-sm font-medium">Logout</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
 

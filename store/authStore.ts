@@ -9,6 +9,8 @@ import {
   disconnectSocket,
   setAuthFailHandler,
 } from "@/services/socket";
+import { clearAllMessages } from "@/services/messageDb";
+import { useChatStore } from "@/store/chatStore";
 
 const TOKEN_SLOT = "whisper_jwt";
 const USERNAME_SLOT = "whisper_username";
@@ -36,6 +38,9 @@ async function clearSession() {
   await clearKeys();
   await api.clearToken();
   await SecureStore.deleteItemAsync(USERNAME_SLOT);
+  // Clear in-memory messages and DB (security wipe on logout)
+  useChatStore.getState().reset();
+  await clearAllMessages();
 }
 
 export const useAuthStore = create<AuthStore>((set) => ({

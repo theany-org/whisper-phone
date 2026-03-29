@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import {
   FlatList,
+  Modal,
   Platform,
   Pressable,
   Text,
@@ -10,10 +12,7 @@ import {
   View,
 } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
-import {
-  KeyboardAvoidingView,
-  OverKeyboardView,
-} from "react-native-keyboard-controller";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
@@ -22,6 +21,7 @@ import MessageBubble from "@/components/MessageBubble";
 import type { ChatMessage } from "@/types";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const REPLY_PREVIEW_MAX = 120;
 
 export default function ChatScreen() {
   const { username: recipient } = useLocalSearchParams<{ username: string }>();
@@ -33,12 +33,13 @@ export default function ChatScreen() {
   const ensureConversation = useChatStore((s) => s.ensureConversation);
   const [text, setText] = useState("");
   const [online, setOnline] = useState(false);
-  const [contextText, setContextText] = useState<string | null>(null);
+  const [contextMsg, setContextMsg] = useState<ChatMessage | null>(null);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
 
   useEffect(() => {
     if (recipient) ensureConversation(recipient);
-  }, [recipient]);
+  }, [ensureConversation, recipient]);
 
   // Poll online status
   useEffect(() => {
@@ -71,20 +72,46 @@ export default function ChatScreen() {
   const handleSend = async () => {
     const trimmed = text.trim();
     if (!trimmed || !recipient) return;
+    const replySnapshot = replyingTo
+      ? {
+          id: replyingTo.id,
+          text: replyingTo.text.slice(0, REPLY_PREVIEW_MAX),
+          from: replyingTo.from,
+        }
+      : undefined;
     setText("");
-    await send(myUsername, recipient, trimmed);
+    setReplyingTo(null);
+    await send(myUsername, recipient, trimmed, replySnapshot);
   };
 
-  const closeContextMenu = () => setContextText(null);
+  const closeContextMenu = () => setContextMsg(null);
 
   const handleCopyMessage = async () => {
-    if (!contextText) return;
-    await Clipboard.setStringAsync(contextText);
+    if (!contextMsg) return;
+    await Clipboard.setStringAsync(contextMsg.text);
     if (Platform.OS === "android") {
       ToastAndroid.show("Copied", ToastAndroid.SHORT);
     }
     closeContextMenu();
   };
+
+  const handleReplyFromMenu = () => {
+    if (!contextMsg) return;
+    setReplyingTo(contextMsg);
+    closeContextMenu();
+  };
+
+  const contextTime = contextMsg
+    ? new Date(contextMsg.timestamp * 1000).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
+  const contextSender = contextMsg
+    ? contextMsg.isMine
+      ? "You"
+      : contextMsg.from
+    : "";
 
   return (
     <KeyboardAvoidingView
@@ -118,7 +145,8 @@ export default function ChatScreen() {
         renderItem={({ item }) => (
           <MessageBubble
             message={item}
-            onLongPressMessage={(value) => setContextText(value)}
+            onLongPress={(msg) => setContextMsg(msg)}
+            onReply={(msg) => setReplyingTo(msg)}
           />
         )}
         contentContainerStyle={{
@@ -130,6 +158,23 @@ export default function ChatScreen() {
           flatListRef.current?.scrollToEnd({ animated: false })
         }
       />
+
+      {/* Reply preview bar */}
+      {replyingTo && (
+        <View className="flex-row items-center px-4 py-2 border-t border-neutral-800 bg-neutral-950 gap-3">
+          <View className="flex-1 border-l-2 border-blue-500 pl-2">
+            <Text className="text-blue-400 text-[11px] font-semibold mb-0.5">
+              {replyingTo.isMine ? "You" : replyingTo.from}
+            </Text>
+            <Text className="text-neutral-400 text-[12px]" numberOfLines={1}>
+              {replyingTo.text}
+            </Text>
+          </View>
+          <Pressable onPress={() => setReplyingTo(null)} hitSlop={8}>
+            <Text className="text-neutral-500 text-lg leading-none">✕</Text>
+          </Pressable>
+        </View>
+      )}
 
       {/* Input bar */}
       <View className="flex-row items-end px-4 py-3 border-t border-neutral-900 gap-2">
@@ -152,19 +197,99 @@ export default function ChatScreen() {
         </Pressable>
       </View>
 
-      <OverKeyboardView visible={Boolean(contextText)}>
-        <Pressable
-          onPress={closeContextMenu}
-          className="flex-1 justify-end bg-black/40"
-        >
-          <Pressable
-            onPress={handleCopyMessage}
-            className="mx-4 mb-5 rounded-2xl border border-neutral-700 bg-neutral-900 px-4 py-4"
+      <Modal
+        animationType="fade"
+        transparent
+        visible={Boolean(contextMsg)}
+        onRequestClose={closeContextMenu}
+      >
+        <View className="flex-1 justify-end bg-black/60">
+          <Pressable onPress={closeContextMenu} className="absolute inset-0" />
+
+          <View
+            className="mx-4 mb-5 rounded-[26px] border border-neutral-800 bg-neutral-950 overflow-hidden"
+            style={{
+              elevation: 12,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.32,
+              shadowRadius: 20,
+            }}
           >
-            <Text className="text-white text-base font-medium">Copy</Text>
-          </Pressable>
-        </Pressable>
-      </OverKeyboardView>
+            <View className="px-4 pt-4 pb-3">
+              {contextMsg && (
+                <View
+                  className={`rounded-2xl px-4 py-3 border ${
+                    contextMsg.isMine
+                      ? "bg-blue-600/14 border-blue-400/20"
+                      : "bg-neutral-900 border-neutral-800"
+                  }`}
+                >
+                  <View className="flex-row items-center justify-between mb-2">
+                    <View className="flex-row items-center gap-2">
+                      <View
+                        className={`w-2 h-2 rounded-full ${
+                          contextMsg.isMine ? "bg-blue-400" : "bg-neutral-500"
+                        }`}
+                      />
+                      <Text
+                        className={`text-xs font-semibold ${
+                          contextMsg.isMine
+                            ? "text-blue-200"
+                            : "text-neutral-400"
+                        }`}
+                      >
+                        {contextSender}
+                      </Text>
+                    </View>
+                    <View className="px-2 py-1 rounded-full bg-black/20 border border-white/5">
+                      <Text className="text-[10px] font-medium text-neutral-400">
+                        {contextTime}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text
+                    className="text-white text-[15px] leading-5"
+                    numberOfLines={4}
+                  >
+                    {contextMsg.text}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View className="px-4 pb-4">
+              <View className="flex-row rounded-[22px] border border-neutral-800 bg-neutral-900 overflow-hidden">
+                <Pressable
+                  onPress={handleReplyFromMenu}
+                  className="flex-1 flex-row items-center justify-center gap-2 py-4 bg-blue-500/10 active:bg-blue-500/16"
+                >
+                  <View className="w-8 h-8 rounded-full items-center justify-center bg-blue-500/18 border border-blue-300/15">
+                    <Ionicons name="arrow-undo" size={16} color="#93c5fd" />
+                  </View>
+                  <Text className="text-[15px] font-semibold text-blue-100">
+                    Reply
+                  </Text>
+                </Pressable>
+
+                <View className="w-px bg-neutral-800" />
+
+                <Pressable
+                  onPress={handleCopyMessage}
+                  className="flex-1 flex-row items-center justify-center gap-2 py-4 active:bg-neutral-800"
+                >
+                  <View className="w-8 h-8 rounded-full items-center justify-center bg-neutral-800 border border-neutral-700">
+                    <Ionicons name="copy-outline" size={16} color="#e5e5e5" />
+                  </View>
+                  <Text className="text-[15px] font-semibold text-white">
+                    Copy
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
