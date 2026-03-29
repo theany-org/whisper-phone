@@ -19,6 +19,7 @@ let reconnectAttempt = 0;
 let consecutiveFailures = 0;
 let shouldReconnect = false;
 let intentionalClose = false;
+let isConnecting = false; // guards the async gap between null-check and socket creation
 
 function readyStateLabel(state?: number | null): string {
   if (state === WebSocket.CONNECTING) return "CONNECTING";
@@ -57,6 +58,11 @@ async function doConnect() {
     console.log("[WS] connect skipped - socket already active");
     return;
   }
+  if (isConnecting) {
+    console.log("[WS] connect skipped - ticket fetch already in flight");
+    return;
+  }
+  isConnecting = true;
 
   // Fetch a short-lived, single-use ticket via authenticated HTTP
   let ticket: string;
@@ -64,10 +70,12 @@ async function doConnect() {
     ticket = await fetchWsTicket();
   } catch (err) {
     console.error("[WS] failed to fetch ticket", err);
+    isConnecting = false;
     consecutiveFailures++;
     scheduleReconnect();
     return;
   }
+  isConnecting = false;
 
   intentionalClose = false;
 
@@ -169,6 +177,7 @@ export function disconnectSocket() {
   }
   consecutiveFailures = 0;
   reconnectAttempt = 0;
+  isConnecting = false;
   onStatus?.(false);
 }
 

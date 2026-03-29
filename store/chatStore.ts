@@ -7,15 +7,12 @@ import { saveMessage, loadAllMessages } from "@/services/messageDb";
 import { useSettingsStore } from "@/store/settingsStore";
 import type { ChatMessage, Conversation, InboundWireMessage, ReplyInfo } from "@/types";
 
-// In-memory public key cache (never persisted)
-const pubKeyCache = new Map<string, string>();
-
+// Always fetch the recipient's current public key from the server.
+// Caching was removed because recipients regenerate their keypair on every
+// login (forward secrecy). A stale cached key causes decryption to fail
+// silently — correctness beats the minor latency saving.
 async function getPublicKey(username: string): Promise<string> {
-  const cached = pubKeyCache.get(username);
-  if (cached) return cached;
-  const key = await api.fetchPublicKey(username);
-  pubKeyCache.set(username, key);
-  return key;
+  return api.fetchPublicKey(username);
 }
 
 interface ChatStore {
@@ -86,11 +83,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     setMessageHandler(async (wire: InboundWireMessage) => {
       try {
         const senderPub = await getPublicKey(wire.from);
-        const decrypted = await decryptMessage(
-          wire.ciphertext,
-          wire.nonce,
-          senderPub
-        );
+        const decrypted = await decryptMessage(wire.ciphertext, wire.nonce, senderPub);
 
         // Support structured payload { text, replyTo } or plain string (backward compat)
         let text: string;
@@ -127,7 +120,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const convs = state.conversations.filter((c) => c.username !== key);
           convs.unshift({
             username: key,
-            lastMessage: plaintext,
+            lastMessage: text,
             lastTimestamp: wire.timestamp,
           });
 

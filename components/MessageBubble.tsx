@@ -99,159 +99,154 @@ export default function MessageBubble({
 
     return {
       opacity: progress,
-      width: interpolate(progress, [0, 1], [34, 72]),
       transform: [
-        { translateX: interpolate(progress, [0, 1], [14, -2]) },
-        { scale: interpolate(progress, [0, 1], [0.88, 1]) },
+        { translateX: interpolate(progress, [0, 1], [10, -2]) },
+        { scale: interpolate(progress, [0, 1], [0.7, 1]) },
       ],
     };
   });
 
   return (
     <GestureDetector gesture={pan}>
+      {/* Full-width row so received messages (left-aligned) can be swiped
+          from anywhere on the row, not just over the narrow bubble. */}
       <View
         style={{
-          alignSelf: message.isMine ? "flex-end" : "flex-start",
+          width: "100%",
           marginBottom: 8,
-          maxWidth: "80%",
-          position: "relative",
+          flexDirection: "row",
+          justifyContent: message.isMine ? "flex-end" : "flex-start",
         }}
       >
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            replyIconStyle,
-            {
-              alignItems: "center",
-              backgroundColor: "rgba(37,99,235,0.22)",
-              borderColor: "rgba(147,197,253,0.42)",
-              borderRadius: 999,
-              borderWidth: 1,
-              flexDirection: "row",
-              gap: 6,
-              height: 34,
-              justifyContent: "flex-start",
-              overflow: "hidden",
-              paddingHorizontal: 10,
-              position: "absolute",
-              right: -50,
-              shadowColor: "#2563eb",
-              shadowOffset: { width: 0, height: 6 },
-              shadowOpacity: 0.24,
-              shadowRadius: 12,
-              top: "50%",
-              marginTop: -17,
-            },
-          ]}
+        <View
+          style={{
+            maxWidth: "80%",
+            position: "relative",
+          }}
         >
-          <View
-            style={{
-              alignItems: "center",
-              backgroundColor: "rgba(255,255,255,0.12)",
-              borderRadius: 999,
-              height: 20,
-              justifyContent: "center",
-              width: 20,
-            }}
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              replyIconStyle,
+              {
+                alignItems: "center",
+                backgroundColor: "rgba(37,99,235,0.22)",
+                borderColor: "rgba(147,197,253,0.42)",
+                borderRadius: 999,
+                borderWidth: 1,
+                height: 34,
+                justifyContent: "center",
+                position: "absolute",
+                right: -44,
+                shadowColor: "#2563eb",
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.24,
+                shadowRadius: 12,
+                top: "50%",
+                marginTop: -17,
+                width: 34,
+              },
+            ]}
           >
-            <Ionicons name="arrow-undo" size={12} color="#dbeafe" />
-          </View>
-          <Text
-            style={{
-              color: "#dbeafe",
-              fontSize: 12,
-              fontWeight: "700",
-              letterSpacing: 0.2,
-            }}
-          >
-            Reply
-          </Text>
-        </Animated.View>
+            <View
+              style={{
+                alignItems: "center",
+                backgroundColor: "rgba(255,255,255,0.12)",
+                borderRadius: 999,
+                height: 20,
+                justifyContent: "center",
+                width: 20,
+              }}
+            >
+              <Ionicons name="arrow-undo" size={12} color="#dbeafe" />
+            </View>
+          </Animated.View>
 
-        <Animated.View
-          style={[
-            bubbleStyle,
-            {
-              paddingHorizontal: 16,
-              paddingVertical: 8,
-              borderRadius: 18,
-              borderBottomRightRadius: message.isMine ? 4 : 18,
-              borderBottomLeftRadius: message.isMine ? 18 : 4,
-            },
-          ]}
-        >
-          <Pressable
-            onLongPress={() => {
-              scale.value = withSequence(
-                withTiming(0.95, { duration: 70 }),
-                withSpring(1, { damping: 7, stiffness: 180 }),
-              );
-              triggerLongPress();
-            }}
-            onPressIn={() => {
-              scale.value = withSpring(0.98, { damping: 8, stiffness: 220 });
-            }}
-            onPressOut={() => {
-              scale.value = withSpring(1, { damping: 8, stiffness: 220 });
-            }}
-            delayLongPress={250}
+          <Animated.View
+            style={[
+              bubbleStyle,
+              {
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+                borderRadius: 18,
+                borderBottomRightRadius: message.isMine ? 4 : 18,
+                borderBottomLeftRadius: message.isMine ? 18 : 4,
+              },
+            ]}
           >
-            {message.replyTo && (
-              <View
-                style={{
-                  marginBottom: 8,
-                  paddingLeft: 10,
-                  paddingRight: 4,
-                  paddingVertical: 4,
-                  borderRadius: 8,
-                  borderLeftWidth: 2,
-                  backgroundColor: message.isMine
-                    ? "rgba(255,255,255,0.12)"
-                    : "rgba(255,255,255,0.07)",
-                  borderLeftColor: message.isMine
-                    ? "rgba(255,255,255,0.45)"
-                    : "rgba(96,165,250,0.65)",
-                }}
-              >
-                <Text
+            <Pressable
+              onLongPress={() => {
+                scale.value = withSequence(
+                  withTiming(0.95, { duration: 70 }),
+                  withSpring(1, { damping: 7, stiffness: 180 }),
+                );
+                triggerLongPress();
+              }}
+              onPressIn={() => {
+                scale.value = withSpring(0.98, { damping: 8, stiffness: 220 });
+              }}
+              onPressOut={() => {
+                scale.value = withSpring(1, { damping: 8, stiffness: 220 });
+              }}
+              delayLongPress={250}
+            >
+              {message.replyTo && (
+                <View
                   style={{
-                    fontSize: 11,
-                    fontWeight: "600",
-                    color: message.isMine
-                      ? "rgba(255,255,255,0.85)"
-                      : "#60a5fa",
-                    marginBottom: 2,
+                    marginBottom: 8,
+                    paddingLeft: 10,
+                    paddingRight: 4,
+                    paddingVertical: 4,
+                    borderRadius: 8,
+                    borderLeftWidth: 2,
+                    backgroundColor: message.isMine
+                      ? "rgba(255,255,255,0.12)"
+                      : "rgba(255,255,255,0.07)",
+                    borderLeftColor: message.isMine
+                      ? "rgba(255,255,255,0.45)"
+                      : "rgba(96,165,250,0.65)",
                   }}
                 >
-                  {message.replyTo.from}
-                </Text>
-                <Text
-                  style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}
-                  numberOfLines={2}
-                >
-                  {message.replyTo.text}
-                </Text>
-              </View>
-            )}
-
-            <Text className="text-white text-[15px] leading-5">
-              {message.text}
-            </Text>
-
-            <View className="flex-row items-center justify-end mt-1 gap-1">
-              <Text className="text-[11px] text-white/50">{time}</Text>
-              {message.isMine && (
-                <Text className="text-[11px] text-white/50">
-                  {message.status === "sending"
-                    ? "..."
-                    : message.status === "failed"
-                      ? "!"
-                      : "✓"}
-                </Text>
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: "600",
+                      color: message.isMine
+                        ? "rgba(255,255,255,0.85)"
+                        : "#60a5fa",
+                      marginBottom: 2,
+                    }}
+                  >
+                    {message.replyTo.from}
+                  </Text>
+                  <Text
+                    style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}
+                    numberOfLines={2}
+                  >
+                    {message.replyTo.text}
+                  </Text>
+                </View>
               )}
-            </View>
-          </Pressable>
-        </Animated.View>
+
+              <Text className="text-white text-[15px] leading-5">
+                {message.text}
+              </Text>
+
+              <View className="flex-row items-center justify-end mt-1 gap-1">
+                <Text className="text-[11px] text-white/50">{time}</Text>
+                {message.isMine && (
+                  <Text className="text-[11px] text-white/50">
+                    {message.status === "sending"
+                      ? "..."
+                      : message.status === "failed"
+                        ? "!"
+                        : "✓"}
+                  </Text>
+                )}
+              </View>
+            </Pressable>
+          </Animated.View>
+        </View>
       </View>
     </GestureDetector>
   );
