@@ -24,16 +24,27 @@ const BG_MINE_ACTIVE = "#3b82f6"; // blue-500 — subtle highlight at threshold
 const BG_THEIRS_NORMAL = "#262626";
 const BG_THEIRS_ACTIVE = "#404040"; // neutral-700
 
+function formatDuration(secs: number): string {
+  const s = Math.max(0, Math.floor(secs));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 interface Props {
   message: ChatMessage;
   onLongPress?: (message: ChatMessage) => void;
   onReply?: (message: ChatMessage) => void;
+  isPlayingVoice?: boolean;
+  voiceCurrentTime?: number;
+  onPlayPauseVoice?: (message: ChatMessage) => void;
 }
 
 export default function MessageBubble({
   message,
   onLongPress,
   onReply,
+  isPlayingVoice = false,
+  voiceCurrentTime = 0,
+  onPlayPauseVoice,
 }: Props) {
   const scale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -223,14 +234,68 @@ export default function MessageBubble({
                     style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}
                     numberOfLines={2}
                   >
-                    {message.replyTo.text}
+                    {message.replyTo.text || "🎤 Voice message"}
                   </Text>
                 </View>
               )}
 
-              <Text className="text-white text-[15px] leading-5">
-                {message.text}
-              </Text>
+              {message.type === "voice" ? (
+                <Pressable
+                  onPress={() => onPlayPauseVoice?.(message)}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    minWidth: 160,
+                  }}
+                >
+                  <Ionicons
+                    name={isPlayingVoice ? "pause-circle" : "play-circle"}
+                    size={38}
+                    color={message.audioUri ? "#fff" : "rgba(255,255,255,0.35)"}
+                  />
+                  <View style={{ flex: 1, gap: 5 }}>
+                    {/* Progress bar */}
+                    <View
+                      style={{
+                        height: 3,
+                        backgroundColor: "rgba(255,255,255,0.2)",
+                        borderRadius: 2,
+                      }}
+                    >
+                      <View
+                        style={{
+                          height: 3,
+                          borderRadius: 2,
+                          backgroundColor: message.audioUri
+                            ? "rgba(255,255,255,0.8)"
+                            : "rgba(255,255,255,0.2)",
+                          width: `${Math.min(
+                            100,
+                            message.duration && isPlayingVoice
+                              ? (voiceCurrentTime / message.duration) * 100
+                              : 0
+                          )}%`,
+                        }}
+                      />
+                    </View>
+                    <Text
+                      style={{
+                        color: "rgba(255,255,255,0.7)",
+                        fontSize: 12,
+                      }}
+                    >
+                      {isPlayingVoice
+                        ? `${formatDuration(voiceCurrentTime)} / ${formatDuration(message.duration ?? 0)}`
+                        : formatDuration(message.duration ?? 0)}
+                    </Text>
+                  </View>
+                </Pressable>
+              ) : (
+                <Text className="text-white text-[15px] leading-5">
+                  {message.text}
+                </Text>
+              )}
 
               <View className="flex-row items-center justify-end mt-1 gap-1">
                 <Text className="text-[11px] text-white/50">{time}</Text>

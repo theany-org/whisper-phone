@@ -13,11 +13,14 @@ import {
 } from "react-native";
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { createAudioPlayer } from "expo-audio";
+import type { AudioPlayer, AudioStatus } from "expo-audio";
 
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import { checkUserExists } from "@/services/api";
 import MessageBubble from "@/components/MessageBubble";
+import VoiceRecorder from "@/components/VoiceRecorder";
 import type { ChatMessage } from "@/types";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -30,6 +33,7 @@ export default function ChatScreen() {
     (s) => s.messages[recipient ?? ""] ?? EMPTY_MESSAGES,
   );
   const send = useChatStore((s) => s.send);
+  const sendVoice = useChatStore((s) => s.sendVoice);
   const ensureConversation = useChatStore((s) => s.ensureConversation);
   const setActivePeer = useChatStore((s) => s.setActivePeer);
   const clearActivePeer = useChatStore((s) => s.clearActivePeer);
@@ -37,7 +41,12 @@ export default function ChatScreen() {
   const [online, setOnline] = useState(false);
   const [contextMsg, setContextMsg] = useState<ChatMessage | null>(null);
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [showRecorder, setShowRecorder] = useState(false);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [playCurrentTime, setPlayCurrentTime] = useState(0);
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
+  const playerSubRef = useRef<{ remove(): void } | null>(null);
 
   useEffect(() => {
     if (recipient) ensureConversation(recipient);
@@ -79,13 +88,68 @@ export default function ChatScreen() {
     }
   }, [messages.length]);
 
+  // Clean up audio player on unmount
+  useEffect(() => {
+    return () => {
+      playerSubRef.current?.remove();
+      playerRef.current?.remove();
+    };
+  }, []);
+
+  const handlePlayPauseVoice = (msg: ChatMessage) => {
+    if (!msg.audioUri) return;
+
+    if (playingId === msg.id) {
+      if (playerRef.current?.playing) {
+        playerRef.current.pause();
+      } else {
+        playerRef.current?.play();
+      }
+      return;
+    }
+
+    // Stop current player and start a new one
+    playerSubRef.current?.remove();
+    playerRef.current?.remove();
+    playerRef.current = null;
+    setPlayingId(msg.id);
+    setPlayCurrentTime(0);
+
+    const player = createAudioPlayer({ uri: msg.audioUri }, { updateInterval: 200 });
+    playerRef.current = player;
+
+    playerSubRef.current = player.addListener(
+      "playbackStatusUpdate",
+      (status: AudioStatus) => {
+        setPlayCurrentTime(status.currentTime);
+        if (status.didJustFinish) {
+          setPlayingId(null);
+          setPlayCurrentTime(0);
+          playerSubRef.current?.remove();
+          playerRef.current?.remove();
+          playerRef.current = null;
+        }
+      }
+    );
+
+    player.play();
+  };
+
+  const handleSendVoice = async (uri: string, duration: number) => {
+    setShowRecorder(false);
+    if (!recipient) return;
+    await sendVoice(myUsername, recipient, uri, duration);
+  };
+
   const handleSend = async () => {
     const trimmed = text.trim();
     if (!trimmed || !recipient) return;
     const replySnapshot = replyingTo
       ? {
           id: replyingTo.id,
-          text: replyingTo.text.slice(0, REPLY_PREVIEW_MAX),
+          text: replyingTo.type === "voice"
+            ? "🎤 Voice message"
+            : replyingTo.text.slice(0, REPLY_PREVIEW_MAX),
           from: replyingTo.from,
         }
       : undefined;
@@ -157,6 +221,9 @@ export default function ChatScreen() {
             message={item}
             onLongPress={(msg) => setContextMsg(msg)}
             onReply={(msg) => setReplyingTo(msg)}
+            isPlayingVoice={playingId === item.id}
+            voiceCurrentTime={playingId === item.id ? playCurrentTime : 0}
+            onPlayPauseVoice={handlePlayPauseVoice}
           />
         )}
         contentContainerStyle={{
@@ -177,7 +244,7 @@ export default function ChatScreen() {
               {replyingTo.isMine ? "You" : replyingTo.from}
             </Text>
             <Text className="text-neutral-400 text-[12px]" numberOfLines={1}>
-              {replyingTo.text}
+              {replyingTo.type === "voice" ? "🎤 Voice message" : replyingTo.text}
             </Text>
           </View>
           <Pressable onPress={() => setReplyingTo(null)} hitSlop={8}>
@@ -186,26 +253,39 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {/* Input bar */}
-      <View className="flex-row items-end px-4 py-3 border-t border-neutral-900 gap-2">
-        <TextInput
-          className="flex-1 bg-neutral-900 text-white px-4 py-3 rounded-2xl text-base border border-neutral-800 max-h-28"
-          placeholder="Message..."
-          placeholderTextColor="#666"
-          multiline
-          value={text}
-          onChangeText={setText}
+      {/* Input bar / Voice recorder */}
+      {showRecorder ? (
+        <VoiceRecorder
+          onSend={handleSendVoice}
+          onCancel={() => setShowRecorder(false)}
         />
-        <Pressable
-          onPress={handleSend}
-          disabled={!text.trim()}
-          className={`w-10 h-10 rounded-full items-center justify-center ${
-            text.trim() ? "bg-blue-600 active:bg-blue-700" : "bg-neutral-800"
-          }`}
-        >
-          <Text className="text-white font-bold text-lg">↑</Text>
-        </Pressable>
-      </View>
+      ) : (
+        <View className="flex-row items-end px-4 py-3 border-t border-neutral-900 gap-2">
+          <TextInput
+            className="flex-1 bg-neutral-900 text-white px-4 py-3 rounded-2xl text-base border border-neutral-800 max-h-28"
+            placeholder="Message..."
+            placeholderTextColor="#666"
+            multiline
+            value={text}
+            onChangeText={setText}
+          />
+          {text.trim() ? (
+            <Pressable
+              onPress={handleSend}
+              className="w-10 h-10 rounded-full items-center justify-center bg-blue-600 active:bg-blue-700"
+            >
+              <Text className="text-white font-bold text-lg">↑</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={() => setShowRecorder(true)}
+              className="w-10 h-10 rounded-full items-center justify-center bg-neutral-800 active:bg-neutral-700"
+            >
+              <Ionicons name="mic" size={20} color="#aaa" />
+            </Pressable>
+          )}
+        </View>
+      )}
 
       <Modal
         animationType="fade"
@@ -282,19 +362,22 @@ export default function ChatScreen() {
                   </Text>
                 </Pressable>
 
-                <View className="w-px bg-neutral-800" />
-
-                <Pressable
-                  onPress={handleCopyMessage}
-                  className="flex-1 flex-row items-center justify-center gap-2 py-4 active:bg-neutral-800"
-                >
-                  <View className="w-8 h-8 rounded-full items-center justify-center bg-neutral-800 border border-neutral-700">
-                    <Ionicons name="copy-outline" size={16} color="#e5e5e5" />
-                  </View>
-                  <Text className="text-[15px] font-semibold text-white">
-                    Copy
-                  </Text>
-                </Pressable>
+                {contextMsg?.type !== "voice" && (
+                  <>
+                    <View className="w-px bg-neutral-800" />
+                    <Pressable
+                      onPress={handleCopyMessage}
+                      className="flex-1 flex-row items-center justify-center gap-2 py-4 active:bg-neutral-800"
+                    >
+                      <View className="w-8 h-8 rounded-full items-center justify-center bg-neutral-800 border border-neutral-700">
+                        <Ionicons name="copy-outline" size={16} color="#e5e5e5" />
+                      </View>
+                      <Text className="text-[15px] font-semibold text-white">
+                        Copy
+                      </Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
             </View>
           </View>

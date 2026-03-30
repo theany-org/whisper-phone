@@ -37,48 +37,24 @@ export async function clearKeys(): Promise<void> {
   await SecureStore.deleteItemAsync(PRIVATE_KEY_SLOT);
 }
 
-// ── Encryption ──────────────────────────────────────────────────────
+// ── Shared Core ──────────────────────────────────────────────────────
 
-export interface EncryptedPayload {
-  ciphertext: string; // base64
-  nonce: string; // base64
-}
-
-/** Encrypt a plaintext string for `recipientPublicKeyB64`.
- *  Uses NaCl box (X25519 + XSalsa20-Poly1305). */
-export async function encryptMessage(
-  plaintext: string,
+async function _encrypt(
+  data: Uint8Array,
   recipientPublicKeyB64: string
 ): Promise<EncryptedPayload> {
-  console.log("[CRYPTO] encrypt start", {
-    plaintextLength: plaintext.length,
-    recipientPublicKeyLength: recipientPublicKeyB64.length,
-  });
-
   const privateKey = await getPrivateKey();
   if (!privateKey) throw new Error("Private key not found");
-  console.log("[CRYPTO] private key loaded", { privateKeyLength: privateKey.length });
 
   const recipientPub = decodeBase64(recipientPublicKeyB64);
   const sharedKey = nacl.box.before(recipientPub, privateKey);
-  console.log("[CRYPTO] shared key derived", {
-    recipientPublicKeyBytes: recipientPub.length,
-    sharedKeyLength: sharedKey.length,
-  });
 
   const nonceBytes = new Uint8Array(nacl.box.nonceLength);
   const randomBytes = await Crypto.getRandomBytesAsync(nacl.box.nonceLength);
   nonceBytes.set(new Uint8Array(randomBytes));
-  console.log("[CRYPTO] nonce generated", { nonceLength: nonceBytes.length });
 
-  const messageBytes = decodeUTF8(plaintext);
-  const encrypted = nacl.box.after(messageBytes, nonceBytes, sharedKey);
-
+  const encrypted = nacl.box.after(data, nonceBytes, sharedKey);
   if (!encrypted) throw new Error("Encryption failed");
-  console.log("[CRYPTO] encrypt success", {
-    messageBytes: messageBytes.length,
-    ciphertextBytes: encrypted.length,
-  });
 
   return {
     ciphertext: encodeBase64(encrypted),
@@ -86,20 +62,11 @@ export async function encryptMessage(
   };
 }
 
-// ── Decryption ──────────────────────────────────────────────────────
-
-/** Decrypt an incoming message from `senderPublicKeyB64`. */
-export async function decryptMessage(
+async function _decrypt(
   ciphertextB64: string,
   nonceB64: string,
   senderPublicKeyB64: string
-): Promise<string> {
-  console.log("[CRYPTO] decrypt start", {
-    ciphertextLength: ciphertextB64.length,
-    nonceLength: nonceB64.length,
-    senderPublicKeyLength: senderPublicKeyB64.length,
-  });
-
+): Promise<Uint8Array> {
   const privateKey = await getPrivateKey();
   if (!privateKey) throw new Error("Private key not found");
 
@@ -111,5 +78,49 @@ export async function decryptMessage(
   const decrypted = nacl.box.open.after(ciphertext, nonce, sharedKey);
   if (!decrypted) throw new Error("Decryption failed — message tampered or wrong key");
 
-  return encodeUTF8(decrypted);
+  return decrypted;
+}
+
+// ── Encryption ──────────────────────────────────────────────────────
+
+export interface EncryptedPayload {
+  ciphertext: string; // base64
+  nonce: string; // base64
+}
+
+/** Encrypt a plaintext string for `recipientPublicKeyB64`. */
+export async function encryptMessage(
+  plaintext: string,
+  recipientPublicKeyB64: string
+): Promise<EncryptedPayload> {
+  return _encrypt(decodeUTF8(plaintext), recipientPublicKeyB64);
+}
+
+/** Encrypt raw bytes (e.g. audio) for `recipientPublicKeyB64`. */
+export async function encryptBytes(
+  data: Uint8Array,
+  recipientPublicKeyB64: string
+): Promise<EncryptedPayload> {
+  return _encrypt(data, recipientPublicKeyB64);
+}
+
+// ── Decryption ──────────────────────────────────────────────────────
+
+/** Decrypt an incoming text message from `senderPublicKeyB64`. */
+export async function decryptMessage(
+  ciphertextB64: string,
+  nonceB64: string,
+  senderPublicKeyB64: string
+): Promise<string> {
+  const bytes = await _decrypt(ciphertextB64, nonceB64, senderPublicKeyB64);
+  return encodeUTF8(bytes);
+}
+
+/** Decrypt incoming raw bytes (e.g. audio) from `senderPublicKeyB64`. */
+export async function decryptBytes(
+  ciphertextB64: string,
+  nonceB64: string,
+  senderPublicKeyB64: string
+): Promise<Uint8Array> {
+  return _decrypt(ciphertextB64, nonceB64, senderPublicKeyB64);
 }

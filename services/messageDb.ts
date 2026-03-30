@@ -22,10 +22,17 @@ export async function initMessageDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_messages_peer ON messages(peer, timestamp);
   `);
 
-  // Migrate existing databases — add reply columns if they don't exist yet
-  for (const col of ["reply_to_id", "reply_to_text", "reply_to_from"]) {
+  // Migrate existing databases — add columns if they don't exist yet
+  const migrations: Array<[string, string]> = [
+    ["reply_to_id", "TEXT"],
+    ["reply_to_text", "TEXT"],
+    ["reply_to_from", "TEXT"],
+    ["type", "TEXT DEFAULT 'text'"],
+    ["duration", "INTEGER"],
+  ];
+  for (const [col, def] of migrations) {
     try {
-      await db.execAsync(`ALTER TABLE messages ADD COLUMN ${col} TEXT`);
+      await db.execAsync(`ALTER TABLE messages ADD COLUMN ${col} ${def}`);
     } catch {
       // Column already exists — safe to ignore
     }
@@ -39,8 +46,9 @@ export async function saveMessage(
   if (!db) return;
   await db.runAsync(
     `INSERT OR REPLACE INTO messages
-      (id, peer, from_user, to_user, text, timestamp, is_mine, status, reply_to_id, reply_to_text, reply_to_from)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, peer, from_user, to_user, text, timestamp, is_mine, status,
+       reply_to_id, reply_to_text, reply_to_from, type, duration)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     msg.id,
     peer,
     msg.from,
@@ -52,6 +60,8 @@ export async function saveMessage(
     msg.replyTo?.id ?? null,
     msg.replyTo?.text ?? null,
     msg.replyTo?.from ?? null,
+    msg.type ?? "text",
+    msg.duration ?? null,
   );
 }
 
@@ -71,6 +81,8 @@ export async function loadAllMessages(): Promise<
     reply_to_id: string | null;
     reply_to_text: string | null;
     reply_to_from: string | null;
+    type: string | null;
+    duration: number | null;
   }>("SELECT * FROM messages ORDER BY peer, timestamp ASC");
 
   const result: Record<string, ChatMessage[]> = {};
@@ -91,6 +103,9 @@ export async function loadAllMessages(): Promise<
             from: row.reply_to_from!,
           }
         : undefined,
+      type: (row.type === "voice" ? "voice" : "text") as ChatMessage["type"],
+      duration: row.duration ?? undefined,
+      // audioUri is never persisted — voice audio is ephemeral
     });
   }
   return result;

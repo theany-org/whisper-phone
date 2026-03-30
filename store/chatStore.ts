@@ -1,11 +1,12 @@
 import { create } from "zustand";
 
 import * as api from "@/services/api";
-import { encryptMessage, decryptMessage } from "@/crypto/cryptoService";
+import { encryptMessage, decryptMessage, encryptBytes, decryptBytes } from "@/crypto/cryptoService";
 import { sendMessage, setMessageHandler } from "@/services/socket";
 import { saveMessage, loadAllMessages } from "@/services/messageDb";
 import { useSettingsStore } from "@/store/settingsStore";
 import { scheduleMessageNotification } from "@/services/notificationService";
+import { readAudioFileAsBytes, writeTempAudioFile } from "@/services/audioService";
 import type { ChatMessage, Conversation, InboundWireMessage, ReplyInfo } from "@/types";
 
 // Always fetch the recipient's current public key from the server.
@@ -33,6 +34,9 @@ interface ChatStore {
   /** Encrypt and send a message to `recipient`. */
   send: (myUsername: string, recipient: string, plaintext: string, replyTo?: ReplyInfo) => Promise<void>;
 
+  /** Encrypt and send a voice message to `recipient`. */
+  sendVoice: (myUsername: string, recipient: string, audioUri: string, duration: number) => Promise<void>;
+
   setConnected: (v: boolean) => void;
 
   /** Start a new conversation stub if it doesn't exist. */
@@ -46,13 +50,17 @@ function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function messagePreview(msg: ChatMessage): string {
+  return msg.type === "voice" ? "🎤 Voice message" : msg.text;
+}
+
 function buildConversations(messages: Record<string, ChatMessage[]>): Conversation[] {
   return Object.entries(messages)
     .map(([username, msgs]) => {
       const last = msgs[msgs.length - 1];
       return {
         username,
-        lastMessage: last?.text ?? "",
+        lastMessage: last ? messagePreview(last) : "",
         lastTimestamp: last?.timestamp ?? 0,
       };
     })
@@ -92,44 +100,69 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     setMessageHandler(async (wire: InboundWireMessage) => {
       try {
         const senderPub = await getPublicKey(wire.from);
-        const decrypted = await decryptMessage(wire.ciphertext, wire.nonce, senderPub);
+        const msgId = makeId();
 
-        // Support structured payload { text, replyTo } or plain string (backward compat)
-        let text: string;
-        let replyTo: ReplyInfo | undefined;
-        try {
-          const parsed = JSON.parse(decrypted);
-          if (parsed && typeof parsed.text === "string") {
-            text = parsed.text;
-            replyTo = parsed.replyTo;
-          } else {
+        let msg: ChatMessage;
+        let notifBody: string;
+
+        if (wire.type === "voice") {
+          const audioBytes = await decryptBytes(wire.ciphertext, wire.nonce, senderPub);
+          const audioUri = writeTempAudioFile(msgId, audioBytes);
+
+          msg = {
+            id: msgId,
+            from: wire.from,
+            to: myUsername,
+            text: "",
+            type: "voice",
+            duration: wire.duration,
+            audioUri,
+            timestamp: wire.timestamp,
+            isMine: false,
+            status: "sent",
+          };
+          notifBody = "🎤 Voice message";
+        } else {
+          const decrypted = await decryptMessage(wire.ciphertext, wire.nonce, senderPub);
+
+          // Support structured payload { text, replyTo } or plain string (backward compat)
+          let text: string;
+          let replyTo: ReplyInfo | undefined;
+          try {
+            const parsed = JSON.parse(decrypted);
+            if (parsed && typeof parsed.text === "string") {
+              text = parsed.text;
+              replyTo = parsed.replyTo;
+            } else {
+              text = decrypted;
+            }
+          } catch {
             text = decrypted;
           }
-        } catch {
-          text = decrypted;
-        }
 
-        const msg: ChatMessage = {
-          id: makeId(),
-          from: wire.from,
-          to: myUsername,
-          text,
-          timestamp: wire.timestamp,
-          isMine: false,
-          status: "sent",
-          replyTo,
-        };
+          msg = {
+            id: msgId,
+            from: wire.from,
+            to: myUsername,
+            text,
+            type: "text",
+            timestamp: wire.timestamp,
+            isMine: false,
+            status: "sent",
+            replyTo,
+          };
+          notifBody = text.length > 100 ? text.slice(0, 97) + "…" : text;
+        }
 
         set((state) => {
           const key = wire.from;
           const existing = state.messages[key] ?? [];
           const updated = { ...state.messages, [key]: [...existing, msg] };
 
-          // Upsert conversation
           const convs = state.conversations.filter((c) => c.username !== key);
           convs.unshift({
             username: key,
-            lastMessage: text,
+            lastMessage: messagePreview(msg),
             lastTimestamp: wire.timestamp,
           });
 
@@ -144,10 +177,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
         // Show local notification only when the sender's chat is not open
         if (get().activePeer !== wire.from) {
-          scheduleMessageNotification(wire.from, text).catch(() => {});
+          scheduleMessageNotification(wire.from, notifBody).catch(() => {});
         }
       } catch (err) {
-        console.warn("[CHAT_RECV] Failed to decrypt inbound message", {
+        console.warn("[CHAT_RECV] Failed to process inbound message", {
           from: wire.from,
           timestamp: wire.timestamp,
           error: describeError(err),
@@ -232,6 +265,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           lastTimestamp: ts,
         });
 
+
         return { messages: { ...state.messages, [recipient]: msgs }, conversations: convs };
       });
 
@@ -259,6 +293,61 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const failedMsg = { ...optimistic, status: "failed" as const };
         saveMessage(recipient, failedMsg).catch(() => {});
       }
+    }
+  },
+
+  sendVoice: async (myUsername, recipient, audioUri, duration) => {
+    const ts = Math.floor(Date.now() / 1000);
+    const tempId = makeId();
+
+    const optimistic: ChatMessage = {
+      id: tempId,
+      from: myUsername,
+      to: recipient,
+      text: "",
+      type: "voice",
+      duration,
+      audioUri,
+      timestamp: ts,
+      isMine: true,
+      status: "sending",
+    };
+
+    set((state) => {
+      const existing = state.messages[recipient] ?? [];
+      return {
+        messages: { ...state.messages, [recipient]: [...existing, optimistic] },
+      };
+    });
+
+    try {
+      const recipientPub = await getPublicKey(recipient);
+      const audioBytes = await readAudioFileAsBytes(audioUri);
+      const { ciphertext, nonce } = await encryptBytes(audioBytes, recipientPub);
+
+      sendMessage({ to: recipient, type: "voice", ciphertext, nonce, duration, timestamp: ts });
+
+      set((state) => {
+        const msgs = (state.messages[recipient] ?? []).map((m) =>
+          m.id === tempId ? { ...m, status: "sent" as const } : m
+        );
+        const convs = state.conversations.filter((c) => c.username !== recipient);
+        convs.unshift({ username: recipient, lastMessage: "🎤 Voice message", lastTimestamp: ts });
+        return { messages: { ...state.messages, [recipient]: msgs }, conversations: convs };
+      });
+
+      if (useSettingsStore.getState().localPersistence) {
+        const sentMsg = { ...optimistic, status: "sent" as const };
+        saveMessage(recipient, sentMsg).catch(() => {});
+      }
+    } catch (err) {
+      console.error("[CHAT_SEND_VOICE] failed", { to: recipient, error: describeError(err) });
+      set((state) => {
+        const msgs = (state.messages[recipient] ?? []).map((m) =>
+          m.id === tempId ? { ...m, status: "failed" as const } : m
+        );
+        return { messages: { ...state.messages, [recipient]: msgs } };
+      });
     }
   },
 
