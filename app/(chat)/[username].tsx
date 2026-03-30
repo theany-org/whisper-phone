@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -11,7 +11,7 @@ import {
   ToastAndroid,
   View,
 } from "react-native";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { useAuthStore } from "@/store/authStore";
@@ -31,6 +31,8 @@ export default function ChatScreen() {
   );
   const send = useChatStore((s) => s.send);
   const ensureConversation = useChatStore((s) => s.ensureConversation);
+  const setActivePeer = useChatStore((s) => s.setActivePeer);
+  const clearActivePeer = useChatStore((s) => s.clearActivePeer);
   const [text, setText] = useState("");
   const [online, setOnline] = useState(false);
   const [contextMsg, setContextMsg] = useState<ChatMessage | null>(null);
@@ -40,6 +42,14 @@ export default function ChatScreen() {
   useEffect(() => {
     if (recipient) ensureConversation(recipient);
   }, [ensureConversation, recipient]);
+
+  // Suppress notifications for this peer while the screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (recipient) setActivePeer(recipient);
+      return () => clearActivePeer();
+    }, [recipient, setActivePeer, clearActivePeer])
+  );
 
   // Poll online status
   useEffect(() => {

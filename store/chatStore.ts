@@ -5,6 +5,7 @@ import { encryptMessage, decryptMessage } from "@/crypto/cryptoService";
 import { sendMessage, setMessageHandler } from "@/services/socket";
 import { saveMessage, loadAllMessages } from "@/services/messageDb";
 import { useSettingsStore } from "@/store/settingsStore";
+import { scheduleMessageNotification } from "@/services/notificationService";
 import type { ChatMessage, Conversation, InboundWireMessage, ReplyInfo } from "@/types";
 
 // Always fetch the recipient's current public key from the server.
@@ -20,6 +21,11 @@ interface ChatStore {
   messages: Record<string, ChatMessage[]>;
   conversations: Conversation[];
   connected: boolean;
+
+  /** The peer whose chat screen is currently open. Notifications are suppressed for this peer. */
+  activePeer: string | null;
+  setActivePeer: (username: string) => void;
+  clearActivePeer: () => void;
 
   /** Initialize the inbound message handler (call once after auth). */
   initSocket: (myUsername: string) => Promise<void>;
@@ -66,6 +72,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   messages: {},
   conversations: [],
   connected: false,
+  activePeer: null,
+  setActivePeer: (username) => set({ activePeer: username }),
+  clearActivePeer: () => set({ activePeer: null }),
 
   initSocket: async (myUsername) => {
     // Load persisted messages if enabled
@@ -131,6 +140,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           saveMessage(wire.from, msg).catch((err) =>
             console.warn("[CHAT_RECV] Failed to persist message", describeError(err))
           );
+        }
+
+        // Show local notification only when the sender's chat is not open
+        if (get().activePeer !== wire.from) {
+          scheduleMessageNotification(wire.from, text).catch(() => {});
         }
       } catch (err) {
         console.warn("[CHAT_RECV] Failed to decrypt inbound message", {
