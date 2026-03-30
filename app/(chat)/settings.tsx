@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Alert, Switch, Text, View } from "react-native";
+import { Alert, Linking, Pressable, Switch, Text, View } from "react-native";
 import { Stack } from "expo-router";
 
 import { useSettingsStore } from "@/store/settingsStore";
@@ -93,19 +93,112 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      <View
-        style={{
-          alignItems: "center",
-          flexDirection: "row",
-          justifyContent: "center",
-          paddingBottom: 28,
-          paddingHorizontal: 16,
-          gap: 6,
-        }}
-      >
-        <Text style={{ color: "#666", fontSize: 13 }}>Made with</Text>
-        <Ionicons name="heart" size={14} color="#ef4444" />
-        <Text style={{ color: "#666", fontSize: 13 }}>by Sullivan</Text>
+      <View style={{ paddingBottom: 28, paddingHorizontal: 16, gap: 16 }}>
+        <Text
+          style={{
+            color: "#666",
+            fontSize: 12,
+            fontWeight: "600",
+            marginBottom: 8,
+            letterSpacing: 0.5,
+            textTransform: "uppercase",
+          }}
+        >
+          About
+        </Text>
+
+        <View
+          style={{
+            backgroundColor: "#111",
+            borderRadius: 12,
+            paddingHorizontal: 16,
+            paddingVertical: 4,
+          }}
+        >
+          <Pressable
+            onPress={() => Linking.openURL("https://github.com/theany-org/whisper-phone")}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 14,
+              borderBottomWidth: 1,
+              borderBottomColor: "#1a1a1a",
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Ionicons name="logo-github" size={18} color="#fff" />
+              <Text style={{ color: "#fff", fontSize: 15 }}>App Repository</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#444" />
+          </Pressable>
+
+          <Pressable
+            onPress={() => Linking.openURL("https://github.com/theany-org/whisper-server")}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 14,
+              borderBottomWidth: 1,
+              borderBottomColor: "#1a1a1a",
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Ionicons name="logo-github" size={18} color="#fff" />
+              <Text style={{ color: "#fff", fontSize: 15 }}>Server Repository</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#444" />
+          </Pressable>
+
+          <Pressable
+            onPress={() => Linking.openURL("https://t.me/whisper_messenger")}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 14,
+              borderBottomWidth: 1,
+              borderBottomColor: "#1a1a1a",
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Ionicons name="paper-plane" size={18} color="#fff" />
+              <Text style={{ color: "#fff", fontSize: 15 }}>Telegram Channel</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#444" />
+          </Pressable>
+
+          <Pressable
+            onPress={() => Linking.openURL("https://t.me/+50Qn1caEWe4zOTkx")}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 14,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Ionicons name="people" size={18} color="#fff" />
+              <Text style={{ color: "#fff", fontSize: 15 }}>Telegram Group</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#444" />
+          </Pressable>
+        </View>
+
+        <View
+          style={{
+            alignItems: "center",
+            flexDirection: "row",
+            justifyContent: "center",
+            paddingTop: 8,
+            gap: 6,
+          }}
+        >
+          <Text style={{ color: "#666", fontSize: 13 }}>Made with</Text>
+          <Ionicons name="heart" size={14} color="#ef4444" />
+          <Text style={{ color: "#666", fontSize: 13 }}>by Sullivan</Text>
+        </View>
       </View>
     </View>
   );
