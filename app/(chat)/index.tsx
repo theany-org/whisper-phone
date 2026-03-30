@@ -122,7 +122,12 @@ export default function ConversationsScreen() {
               <Text className="text-neutral-400 text-sm font-medium">⚙</Text>
             </Pressable>
             <Pressable
-              onPress={logout}
+              onPress={() =>
+                Alert.alert("Logout", "Are you sure you want to log out?", [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Logout", style: "destructive", onPress: logout },
+                ])
+              }
               className="bg-neutral-900 px-4 py-2 rounded-lg active:bg-neutral-800"
             >
               <Text className="text-red-400 text-sm font-medium">Logout</Text>
