@@ -29,11 +29,17 @@ Keys are generated on your device at registration. The private key is stored in 
 
 - **End-to-end encryption** — NaCl box (X25519 key exchange + XSalsa20-Poly1305 AEAD)
 - **Zero knowledge server** — server never sees plaintext, only ciphertext
+- **Encrypted voice messages** — audio bytes are encrypted before upload; server never touches audio
+- **WebRTC voice calls** — peer-to-peer audio with coturn STUN/TURN for NAT traversal
+- **Reply threading** — quote any message; reply metadata is encrypted alongside message content
+- **Message retry** — failed messages can be resent in-place, preserving thread order
+- **Swipe to reply** — gesture-driven reply with haptic feedback
 - **On-device key generation** — private key stored in hardware-backed secure storage
-- **Key rotation on login** — fresh keypair generated each time you sign in
-- **Real-time messaging** — WebSocket with exponential backoff reconnection
+- **Forward secrecy** — fresh keypair generated each login; previous sessions cannot decrypt new messages
+- **Real-time presence** — push-based online/offline status (no polling)
+- **Offline queue** — messages held on the server for up to 7 days
+- **Local persistence** — optional SQLite message history (toggle in Settings)
 - **Message status** — sending / sent / failed indicators per message
-- **Online presence** — see if a contact is currently connected
 - **Custom server** — point the app at your own self-hosted backend
 - **Dark UI** — clean, minimal dark-mode interface
 
@@ -59,7 +65,7 @@ pnpm install
 
 ### 2. Configure the server URL
 
-Copy the environment file and set your server address:
+The server URL can be set at runtime from the login screen (tap the server icon at the bottom), or via an environment variable before building:
 
 ```bash
 cp .env.example .env
@@ -70,8 +76,6 @@ Edit `.env`:
 ```env
 EXPO_PUBLIC_WHISPER_API_URL=https://your-server.example.com
 ```
-
-> You can also change the server URL at runtime from the login screen — tap the server icon at the bottom.
 
 ### 3. Start the development server
 
@@ -112,63 +116,77 @@ pnpm ios       # runs on simulator
 ```
 whisper/
 ├── app/
-│   ├── _layout.tsx          # Root layout — loads polyfill, hydrates stores
-│   ├── index.tsx            # Entry redirect (auth check)
+│   ├── _layout.tsx              # Root layout — loads polyfill, hydrates stores
 │   ├── (auth)/
-│   │   ├── _layout.tsx      # Auth stack (no header, fade animation)
-│   │   ├── login.tsx        # Sign-in screen + custom server config
-│   │   └── register.tsx     # Registration screen
+│   │   ├── login.tsx            # Sign-in screen + custom server config
+│   │   └── register.tsx         # Registration screen
 │   └── (chat)/
-│       ├── _layout.tsx      # Chat stack (dark header)
-│       ├── index.tsx        # Conversations list
-│       ├── settings.tsx        # Settings
-│       └── [username].tsx   # Chat screen (dynamic route)
+│       ├── _layout.tsx          # Chat tab navigator
+│       ├── index.tsx            # Conversations list
+│       ├── [username].tsx       # Chat screen (dynamic route)
+│       ├── settings.tsx         # Settings
+│       └── (call)/
+│           ├── incoming.tsx     # Incoming call modal
+│           └── active.tsx       # In-call screen
 ├── components/
-│   └── MessageBubble.tsx    # Animated message bubble with status indicator
+│   ├── MessageBubble.tsx        # Animated bubble: swipe-to-reply, voice playback, retry
+│   └── VoiceRecorder.tsx        # Push-to-record UI with waveform timer
 ├── crypto/
-│   ├── polyfill.ts          # Patches crypto.getRandomValues for Hermes/RN
-│   └── cryptoService.ts     # Key generation, NaCl encrypt/decrypt
+│   ├── polyfill.ts              # Patches crypto.getRandomValues for Hermes/RN
+│   └── cryptoService.ts         # Key generation, NaCl encrypt/decrypt (text + binary)
 ├── services/
-│   ├── api.ts               # Axios client — auth + user endpoints
-│   ├── config.ts            # Reads API/WS URLs from serverStore
-│   ├── messageDb.ts         # SQLite for store messages
-│   └── socket.ts            # WebSocket manager with reconnect logic
+│   ├── api.ts                   # Axios client — auth + user endpoints
+│   ├── audioService.ts          # Mic permissions, recording options, file I/O
+│   ├── messageDb.ts             # SQLite persistence helpers
+│   ├── notificationService.ts   # Local push notifications
+│   └── socket.ts                # WebSocket manager with exponential backoff
 ├── store/
-│   ├── authStore.ts         # Auth state (Zustand) — login, register, logout
-│   ├── chatStore.ts         # Messages + conversations (Zustand)
-│   ├── serverStore.ts       # Server URL (persisted in SecureStore)
-│   └── settingsStore.ts     # Settings store
+│   ├── authStore.ts             # Auth state — login, register, logout, keypair
+│   ├── callStore.ts             # WebRTC call state machine
+│   ├── chatStore.ts             # Messages + conversations — send, receive, retry
+│   ├── presenceStore.ts         # Online user set
+│   ├── serverStore.ts           # Server URL (persisted in SecureStore)
+│   └── settingsStore.ts         # App settings (local persistence toggle)
 ├── types/
-│   └── index.ts             # Shared TypeScript interfaces
-└── app.json                 # Expo config
+│   └── index.ts                 # Shared TypeScript interfaces
+├── utils/
+│   └── formatDuration.ts        # mm:ss formatter for voice message durations
+└── app.json                     # Expo config
 ```
 
 ---
 
 ## Cryptography
 
-| Primitive         | Library           | Purpose                   |
-| ----------------- | ----------------- | ------------------------- |
-| X25519 ECDH       | TweetNaCl         | Shared secret derivation  |
-| XSalsa20-Poly1305 | TweetNaCl         | Authenticated encryption  |
-| CSPRNG            | expo-crypto       | Nonce generation          |
-| Secure storage    | expo-secure-store | Private key + JWT at rest |
+| Primitive         | Library           | Purpose                    |
+| ----------------- | ----------------- | -------------------------- |
+| X25519 ECDH       | TweetNaCl         | Shared secret derivation   |
+| XSalsa20-Poly1305 | TweetNaCl         | Authenticated encryption   |
+| CSPRNG            | expo-crypto       | Nonce + keypair generation |
+| Secure storage    | expo-secure-store | Private key + JWT at rest  |
 
 **Key lifecycle:**
 
 1. **Register** — `nacl.box.keyPair()` generates a Curve25519 keypair. Private key is saved to `expo-secure-store`. Public key is sent to the server.
-2. **Login** — A fresh keypair is generated and the new public key is pushed to the server. This ensures a valid local key exists even after reinstall or device change.
+2. **Login** — A fresh keypair is generated and the new public key is pushed to the server. This ensures a valid local key exists even after reinstall or device change, and provides forward secrecy.
 3. **Logout** — Private key is deleted from `expo-secure-store`.
 
-**Message encryption** (sender side):
+**Text message encryption:**
 
 ```
-sharedKey = X25519(myPrivateKey, recipientPublicKey)
-nonce     = random 24 bytes (expo-crypto CSPRNG)
-ciphertext = XSalsa20-Poly1305(plaintext, nonce, sharedKey)
+sharedKey  = X25519(myPrivateKey, recipientPublicKey)
+nonce      = random 24 bytes (CSPRNG)
+payload    = JSON { text, replyTo? }   ← reply metadata encrypted too
+ciphertext = XSalsa20-Poly1305(payload, nonce, sharedKey)
 ```
 
-Both `ciphertext` and `nonce` are base64-encoded and sent over WebSocket.
+**Voice message encryption:**
+
+Same NaCl box scheme applied to raw audio bytes. The encrypted binary is base64-encoded and sent over WebSocket. On receipt it is decrypted and written to a temporary `.m4a` cache file. All voice cache files are deleted on logout.
+
+**Voice calls:**
+
+WebRTC SDP offer/answer and ICE candidates are relayed through the server's WebSocket. The server routes signals via Redis pub/sub but never inspects them. Actual audio is peer-to-peer via coturn STUN/TURN.
 
 ---
 
@@ -198,12 +216,17 @@ The user can also override the server URL at runtime from the login screen. The 
 | -------------- | -------------------------------- |
 | Framework      | Expo 54 / React Native 0.81      |
 | Language       | TypeScript 5.9                   |
-| Routing        | Expo Router (file-based)         |
+| Routing        | Expo Router 6 (file-based)       |
 | State          | Zustand 5                        |
 | Encryption     | TweetNaCl 1.0                    |
 | HTTP           | Axios 1.x                        |
 | Realtime       | Native WebSocket                 |
+| Voice calls    | react-native-webrtc 124          |
+| Audio          | expo-audio 1                     |
+| Animation      | react-native-reanimated 4        |
+| Gestures       | react-native-gesture-handler 2   |
 | Secure storage | expo-secure-store                |
+| Local DB       | expo-sqlite 16                   |
 | Styling        | Tailwind CSS (Uniwind)           |
 | Keyboard       | react-native-keyboard-controller |
 
@@ -211,12 +234,24 @@ The user can also override the server URL at runtime from the login screen. The 
 
 ## Self-Hosting
 
-You can run your own server and point the app at it. See the [server README](https://github.com/theany-org/whisper-server/README.md) for the full setup guide (Docker Compose, environment variables, database migrations).
+You can run your own server and point the app at it. See the [server README](https://github.com/theany-org/whisper-server/README.md) for the full setup guide (Docker Compose, environment variables, database migrations, coturn).
 
 Once your server is running, either:
 
 - Set `EXPO_PUBLIC_WHISPER_API_URL` in `.env` before building, **or**
 - Tap the server icon on the login screen and enter your URL at runtime
+
+---
+
+## Known Limitations
+
+- No public key fingerprint verification — trust on first use (TOFU) only
+- No background push for new messages when the app is fully closed
+- No read receipts or delivered-to-device acknowledgement shown in UI
+- No message ordering guarantees — sequence numbers are not implemented
+- Messages are deleted if a user is offline for more than 7 days (server queue TTL)
+- No group chat
+- Local persistence stores messages in SQLite within the device's app sandbox (not additionally encrypted at rest beyond OS-level protection)
 
 ---
 
@@ -230,6 +265,14 @@ Once your server is running, either:
 
 ---
 
+## Releases
+
+See the [GitHub Releases page](https://github.com/theany-org/whisper-phone/releases) for changelogs and version history.
+
+Current version: **v1.2.0** — adds encrypted voice messages, WebRTC voice calls, message retry, and voice cache cleanup on logout.
+
+---
+
 ## License
 
-[MIT](https://github.com/theany-org/whisper-server/LICENSE)
+[MIT](https://github.com/theany-org/whisper-server/blob/main/LICENSE)
