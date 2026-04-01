@@ -50,7 +50,7 @@ Keys are generated on your device at registration. The private key is stored in 
 - **Node.js** 20+
 - **pnpm** (or npm/yarn)
 - **Expo Go** app (for development) — or a physical device / emulator
-- A running **Whisper server** (see [server setup](https://github.com/theany-org/whisper-server/README.md))
+- A running **Whisper server** (see [server setup](https://github.com/theany-org/whisper-server/blob/main/README.md))
 
 ---
 
@@ -234,7 +234,7 @@ The user can also override the server URL at runtime from the login screen. The 
 
 ## Self-Hosting
 
-You can run your own server and point the app at it. See the [server README](https://github.com/theany-org/whisper-server/README.md) for the full setup guide (Docker Compose, environment variables, database migrations, coturn).
+You can run your own server and point the app at it. See the [server README](https://github.com/theany-org/whisper-server/blob/main/README.md) for the full setup guide (Docker Compose, environment variables, database migrations, coturn).
 
 Once your server is running, either:
 
