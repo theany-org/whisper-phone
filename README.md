@@ -269,7 +269,7 @@ Once your server is running, either:
 
 See the [GitHub Releases page](https://github.com/theany-org/whisper-phone/releases) for changelogs and version history.
 
-Current version: **v1.2.0** — adds encrypted voice messages, WebRTC voice calls, message retry, and voice cache cleanup on logout.
+Current version: **v1.2.1**
 
 ---
 
