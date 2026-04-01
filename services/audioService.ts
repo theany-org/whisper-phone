@@ -60,3 +60,12 @@ export function writeTempAudioFile(messageId: string, bytes: Uint8Array): string
   file.write(bytes);
   return file.uri;
 }
+
+/** Delete a voice cache file. Safe to call with any URI — ignores missing files. */
+export function deleteAudioFile(uri: string): void {
+  try {
+    new File(uri).delete();
+  } catch {
+    // File already gone — nothing to do
+  }
+}

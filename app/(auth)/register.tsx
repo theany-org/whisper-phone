@@ -47,8 +47,9 @@ export default function RegisterScreen() {
     try {
       await register(u, p);
       router.replace("/(chat)");
-    } catch {
-      // error state handled by store
+    } catch (err) {
+      // API errors are displayed via store.error — log unexpected ones in dev
+      if (__DEV__) console.error("[REGISTER] unexpected error", err);
     }
   };
 

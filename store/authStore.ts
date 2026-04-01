@@ -11,6 +11,8 @@ import {
 } from "@/services/socket";
 import { clearAllMessages } from "@/services/messageDb";
 import { useChatStore } from "@/store/chatStore";
+import { useCallStore } from "@/store/callStore";
+import { usePresenceStore } from "@/store/presenceStore";
 
 const TOKEN_SLOT = "whisper_jwt";
 const USERNAME_SLOT = "whisper_username";
@@ -40,6 +42,9 @@ async function clearSession() {
   await SecureStore.deleteItemAsync(USERNAME_SLOT);
   // Clear in-memory messages and DB (security wipe on logout)
   useChatStore.getState().reset();
+  // Unregister call + presence socket handlers and clear their state
+  useCallStore.getState().reset();
+  usePresenceStore.getState().reset();
   await clearAllMessages();
 }
 
@@ -62,6 +67,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
       if (token && username) {
         set({ token, username, isAuthenticated: true, isLoading: false });
         connectSocket(token);
+        useCallStore.getState().registerSocketHandlers();
+        usePresenceStore.getState().registerSocketHandlers();
       } else {
         set({ isLoading: false });
       }
@@ -86,6 +93,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
         isLoading: false,
       });
       connectSocket(token);
+      useCallStore.getState().registerSocketHandlers();
+      usePresenceStore.getState().registerSocketHandlers();
     } catch (err) {
       set({ isLoading: false, error: api.extractErrorMessage(err) });
       throw err;
@@ -111,6 +120,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
         isLoading: false,
       });
       connectSocket(token);
+      useCallStore.getState().registerSocketHandlers();
+      usePresenceStore.getState().registerSocketHandlers();
     } catch (err) {
       set({ isLoading: false, error: api.extractErrorMessage(err) });
       throw err;

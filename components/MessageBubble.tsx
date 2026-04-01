@@ -13,6 +13,7 @@ import Animated, {
 import { scheduleOnRN } from "react-native-worklets";
 import * as Haptics from "expo-haptics";
 import type { ChatMessage } from "@/types";
+import { formatDuration } from "@/utils/formatDuration";
 
 const SWIPE_THRESHOLD = 65;
 const MAX_TRANSLATE = 80;
@@ -24,11 +25,6 @@ const BG_MINE_ACTIVE = "#3b82f6"; // blue-500 — subtle highlight at threshold
 const BG_THEIRS_NORMAL = "#262626";
 const BG_THEIRS_ACTIVE = "#404040"; // neutral-700
 
-function formatDuration(secs: number): string {
-  const s = Math.max(0, Math.floor(secs));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
 interface Props {
   message: ChatMessage;
   onLongPress?: (message: ChatMessage) => void;
@@ -36,6 +32,7 @@ interface Props {
   isPlayingVoice?: boolean;
   voiceCurrentTime?: number;
   onPlayPauseVoice?: (message: ChatMessage) => void;
+  onRetry?: (message: ChatMessage) => void;
 }
 
 export default function MessageBubble({
@@ -45,6 +42,7 @@ export default function MessageBubble({
   isPlayingVoice = false,
   voiceCurrentTime = 0,
   onPlayPauseVoice,
+  onRetry,
 }: Props) {
   const scale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -300,13 +298,15 @@ export default function MessageBubble({
               <View className="flex-row items-center justify-end mt-1 gap-1">
                 <Text className="text-[11px] text-white/50">{time}</Text>
                 {message.isMine && (
-                  <Text className="text-[11px] text-white/50">
-                    {message.status === "sending"
-                      ? "..."
-                      : message.status === "failed"
-                        ? "!"
-                        : "✓"}
-                  </Text>
+                  message.status === "failed" ? (
+                    <Pressable onPress={() => onRetry?.(message)} hitSlop={8}>
+                      <Text style={{ fontSize: 11, color: "#f87171" }}>↺</Text>
+                    </Pressable>
+                  ) : (
+                    <Text className="text-[11px] text-white/50">
+                      {message.status === "sending" ? "..." : "✓"}
+                    </Text>
+                  )
                 )}
               </View>
             </Pressable>

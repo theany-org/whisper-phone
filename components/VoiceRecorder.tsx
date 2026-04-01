@@ -16,6 +16,7 @@ import {
   enableRecordingMode,
   disableRecordingMode,
 } from "@/services/audioService";
+import { formatDuration } from "@/utils/formatDuration";
 
 const MAX_DURATION_S = 120; // 2 minutes
 
@@ -28,10 +29,16 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
   const recorder = useAudioRecorder(VOICE_RECORDING_OPTIONS);
   const state = useAudioRecorderState(recorder, 200);
   const startedRef = useRef(false);
+  // Track duration via ref so stopAndSend always has the latest value.
+  // state.durationMillis is always in ms on both iOS and Android —
+  // recorder.currentTime returns ms on Android but s on iOS, so we avoid it.
+  const durationMsRef = useRef(0);
 
   const elapsedS = Math.floor(state.durationMillis / 1000);
-  const mm = String(Math.floor(elapsedS / 60)).padStart(2, "0");
-  const ss = String(elapsedS % 60).padStart(2, "0");
+
+  useEffect(() => {
+    durationMsRef.current = state.durationMillis;
+  }, [state.durationMillis]);
   const nearEnd = MAX_DURATION_S - elapsedS <= 30;
 
   // Pulsing red dot
@@ -50,7 +57,7 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
   const stopAndSend = useCallback(async () => {
     if (!startedRef.current) return;
     startedRef.current = false;
-    const durationS = Math.max(1, Math.ceil(recorder.currentTime));
+    const durationS = Math.max(1, Math.ceil(durationMsRef.current / 1000));
     await recorder.stop();
     await disableRecordingMode();
     const uri = recorder.uri;
@@ -118,7 +125,6 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
         gap: 12,
       }}
     >
-      {/* Cancel */}
       <Pressable
         onPress={stopAndCancel}
         style={{
@@ -153,7 +159,7 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
           ]}
         />
         <Text style={{ color: "#fff", fontVariant: ["tabular-nums"], fontSize: 16, fontWeight: "500" }}>
-          {mm}:{ss}
+          {formatDuration(elapsedS)}
         </Text>
         {nearEnd && (
           <Text style={{ color: "#f97316", fontSize: 12, marginLeft: "auto" }}>
@@ -162,7 +168,6 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
         )}
       </View>
 
-      {/* Send */}
       <Pressable
         onPress={stopAndSend}
         disabled={elapsedS < 1}

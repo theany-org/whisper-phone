@@ -1,25 +1,29 @@
 import { getWsBaseUrl } from "./config";
 import { fetchWsTicket } from "./api";
 import type { InboundWireMessage, WireMessage } from "@/types";
+import type { OutboundCallSignal } from "@/types/call";
 
-type MessageHandler = (msg: InboundWireMessage) => void;
 type StatusHandler = (connected: boolean) => void;
 type AuthFailHandler = () => void;
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
+const CONNECT_TIMEOUT_MS = 10_000;
 
 let ws: WebSocket | null = null;
-let onMessage: MessageHandler | null = null;
 let onStatus: StatusHandler | null = null;
 let onAuthFail: AuthFailHandler | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let connectTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let consecutiveFailures = 0;
 let shouldReconnect = false;
 let intentionalClose = false;
-let isConnecting = false; // guards the async gap between null-check and socket creation
+let isConnecting = false;
+
+// Type-keyed dispatch table — registered by chatStore, callStore, etc.
+const _handlers = new Map<string, (data: unknown) => void>();
 
 function readyStateLabel(state?: number | null): string {
   if (state === WebSocket.CONNECTING) return "CONNECTING";
@@ -27,6 +31,13 @@ function readyStateLabel(state?: number | null): string {
   if (state === WebSocket.CLOSING) return "CLOSING";
   if (state === WebSocket.CLOSED) return "CLOSED";
   return "NO_SOCKET";
+}
+
+function clearConnectTimeout() {
+  if (connectTimeoutTimer) {
+    clearTimeout(connectTimeoutTimer);
+    connectTimeoutTimer = null;
+  }
 }
 
 function scheduleReconnect() {
@@ -41,30 +52,25 @@ function scheduleReconnect() {
     RECONNECT_BASE_MS * 2 ** reconnectAttempt,
     RECONNECT_MAX_MS
   );
-  console.warn("[WS] scheduling reconnect", {
-    reconnectAttempt,
-    consecutiveFailures,
-    delayMs: delay,
-  });
+  if (__DEV__) console.warn("[WS] scheduling reconnect", { reconnectAttempt, consecutiveFailures, delayMs: delay });
   reconnectTimer = setTimeout(() => {
     reconnectAttempt++;
-    console.log("[WS] reconnect attempt", { reconnectAttempt });
+    if (__DEV__) console.log("[WS] reconnect attempt", { reconnectAttempt });
     doConnect();
   }, delay);
 }
 
 async function doConnect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-    console.log("[WS] connect skipped - socket already active");
+    if (__DEV__) console.log("[WS] connect skipped - socket already active");
     return;
   }
   if (isConnecting) {
-    console.log("[WS] connect skipped - ticket fetch already in flight");
+    if (__DEV__) console.log("[WS] connect skipped - ticket fetch already in flight");
     return;
   }
   isConnecting = true;
 
-  // Fetch a short-lived, single-use ticket via authenticated HTTP
   let ticket: string;
   try {
     ticket = await fetchWsTicket();
@@ -81,27 +87,51 @@ async function doConnect() {
 
   const url = `${getWsBaseUrl()}/ws/chat?ticket=${encodeURIComponent(ticket)}`;
   ws = new WebSocket(url);
-  console.log("[WS] socket created");
+  if (__DEV__) console.log("[WS] socket created");
+
+  // Fail fast if the connection doesn't open within CONNECT_TIMEOUT_MS
+  connectTimeoutTimer = setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.CONNECTING) {
+      if (__DEV__) console.warn("[WS] connection timed out — closing");
+      ws.close();
+    }
+  }, CONNECT_TIMEOUT_MS);
 
   ws.onopen = () => {
+    clearConnectTimeout();
     reconnectAttempt = 0;
     consecutiveFailures = 0;
-    console.log("[WS] open");
+    if (__DEV__) console.log("[WS] open");
     onStatus?.(true);
   };
 
   ws.onmessage = (event) => {
     try {
-      const data = JSON.parse(event.data as string);
+      const data = JSON.parse(event.data as string) as Record<string, unknown>;
+
       if ("error" in data) {
         console.warn("[WS] server error:", data.error);
         return;
       }
-      if (data.type === "status") {
-        console.log("[WS] delivery status", { to: data.to, delivered: data.delivered });
+
+      const type = data.type as string | undefined;
+
+      if (type === "status") {
+        if (__DEV__) console.log("[WS] delivery status", { to: data.to, delivered: data.delivered });
         return;
       }
-      onMessage?.(data as InboundWireMessage);
+
+      if (!type) {
+        if (__DEV__) console.warn("[WS] received frame without type field");
+        return;
+      }
+
+      const handler = _handlers.get(type);
+      if (handler) {
+        handler(data);
+      } else {
+        if (__DEV__) console.warn("[WS] no handler registered for type:", type);
+      }
     } catch (err) {
       console.warn("[WS] failed to parse inbound frame", {
         error: err instanceof Error ? err.message : String(err),
@@ -110,6 +140,7 @@ async function doConnect() {
   };
 
   ws.onerror = (event) => {
+    clearConnectTimeout();
     consecutiveFailures++;
     console.error("[WS] error event", {
       consecutiveFailures,
@@ -119,54 +150,68 @@ async function doConnect() {
   };
 
   ws.onclose = (event) => {
-    console.warn("[WS] close", {
-      code: event.code,
-      reason: event.reason,
-      wasClean: event.wasClean,
-      intentionalClose,
-    });
+    clearConnectTimeout();
+    if (__DEV__) console.warn("[WS] close", { code: event.code, reason: event.reason, wasClean: event.wasClean });
     ws = null;
     onStatus?.(false);
     if (event.code === 4001) {
-      console.warn("[WS] auth rejected (4001)");
+      if (__DEV__) console.warn("[WS] auth rejected (4001)");
       onAuthFail?.();
       return;
     }
     if (event.code === 4002) {
-      // Superseded by another connection — don't reconnect
-      console.warn("[WS] superseded (4002)");
+      if (__DEV__) console.warn("[WS] superseded (4002)");
       return;
     }
     scheduleReconnect();
   };
 }
 
-/** Initiate a WebSocket connection. The token param is accepted for
- *  backward-compat with callers but is no longer sent over the wire —
- *  a short-lived ticket is fetched instead. */
+/** Register a handler for a specific message type. Returns an unsubscribe function. */
+export function registerHandler(type: string, handler: (data: unknown) => void): () => void {
+  _handlers.set(type, handler);
+  return () => _handlers.delete(type);
+}
+
+/**
+ * Register handlers for chat_message and voice frames.
+ * Returns an unsubscribe function — call it on logout to prevent stale closures.
+ */
+export function setMessageHandler(handler: (msg: InboundWireMessage) => void): () => void {
+  const unsub1 = registerHandler("chat_message", handler as (data: unknown) => void);
+  const unsub2 = registerHandler("voice",        handler as (data: unknown) => void);
+  return () => { unsub1(); unsub2(); };
+}
+
 export function connectSocket(_token?: string) {
-  console.log("[WS] connect requested");
+  if (__DEV__) console.log("[WS] connect requested");
   shouldReconnect = true;
   doConnect();
 }
 
+/** Send a chat or voice message frame. */
 export function sendMessage(msg: WireMessage) {
-  console.log("[WS] send requested", {
-    to: msg.to,
-    hasSocket: Boolean(ws),
-    readyState: readyStateLabel(ws?.readyState),
-  });
+  if (__DEV__) console.log("[WS] send", { to: msg.to, readyState: readyStateLabel(ws?.readyState) });
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     throw new Error("WebSocket not connected");
   }
   ws.send(JSON.stringify(msg));
-  console.log("[WS] send frame dispatched", { to: msg.to });
+}
+
+/** Send a call signaling frame (offer, answer, ICE, decline, end). */
+export function sendSignal(signal: OutboundCallSignal) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    throw new Error("WebSocket not connected");
+  }
+  ws.send(JSON.stringify(signal));
+  if (__DEV__) console.log("[WS] call signal dispatched", { type: signal.type, to: signal.to });
 }
 
 export function disconnectSocket() {
   intentionalClose = true;
   shouldReconnect = false;
-  console.log("[WS] disconnect requested");
+  if (__DEV__) console.log("[WS] disconnect requested");
+  clearConnectTimeout();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -181,12 +226,10 @@ export function disconnectSocket() {
   onStatus?.(false);
 }
 
-export function setMessageHandler(handler: MessageHandler) {
-  onMessage = handler;
-}
-
-export function setStatusHandler(handler: StatusHandler) {
+/** Set the connection status callback. Returns a cleanup function. */
+export function setStatusHandler(handler: StatusHandler | null): () => void {
   onStatus = handler;
+  return () => { onStatus = null; };
 }
 
 export function setAuthFailHandler(handler: AuthFailHandler) {

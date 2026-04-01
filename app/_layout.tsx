@@ -17,6 +17,8 @@ import {
   setNotificationChannel,
   requestPermissions,
 } from "@/services/notificationService";
+import IncomingCallModal from "@/components/IncomingCallModal";
+import ActiveCallBar from "@/components/ActiveCallBar";
 
 export default function RootLayout() {
   const hydrateAuth = useAuthStore((s) => s.hydrate);
@@ -56,6 +58,8 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
         <Slot />
+        <IncomingCallModal />
+        <ActiveCallBar />
         <StatusBar style="light" />
       </KeyboardProvider>
     </GestureHandlerRootView>

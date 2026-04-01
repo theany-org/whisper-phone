@@ -12,6 +12,7 @@ import { router, Stack } from "expo-router";
 
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
+import { usePresenceStore } from "@/store/presenceStore";
 import { setStatusHandler } from "@/services/socket";
 import { checkUserExists } from "@/services/api";
 import type { Conversation } from "@/types";
@@ -31,7 +32,8 @@ export default function ConversationsScreen() {
   useEffect(() => {
     if (username) {
       initSocket(username);
-      setStatusHandler(setConnected);
+      const unsub = setStatusHandler(setConnected);
+      return unsub;
     }
   }, [username]);
 
@@ -49,12 +51,18 @@ export default function ConversationsScreen() {
       ensureConversation(target);
       setNewChat("");
       router.push(`/(chat)/${target}`);
-    } catch (err) {
-      Alert.alert("User not found", `"${target}" does not exist.`);
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        Alert.alert("User not found", `"${target}" does not exist.`);
+      } else {
+        Alert.alert("Connection error", "Could not reach the server. Check your connection and try again.");
+      }
     } finally {
       setChecking(false);
     }
   };
+
+  const onlineUsers = usePresenceStore((s) => s.onlineUsers);
 
   const renderConversation = ({ item }: { item: Conversation }) => {
     const time = item.lastTimestamp
@@ -63,16 +71,22 @@ export default function ConversationsScreen() {
           minute: "2-digit",
         })
       : "";
+    const isOnline = onlineUsers.has(item.username);
 
     return (
       <Pressable
         onPress={() => router.push(`/(chat)/${item.username}`)}
         className="flex-row items-center px-4 py-4 border-b border-neutral-900 active:bg-neutral-900"
       >
-        <View className="w-11 h-11 rounded-full bg-blue-600 items-center justify-center mr-3">
-          <Text className="text-white font-bold text-lg">
-            {item.username[0].toUpperCase()}
-          </Text>
+        <View className="w-11 h-11 mr-3">
+          <View className="w-11 h-11 rounded-full bg-blue-600 items-center justify-center">
+            <Text className="text-white font-bold text-lg">
+              {item.username[0].toUpperCase()}
+            </Text>
+          </View>
+          {isOnline && (
+            <View className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-500 border-2 border-black" />
+          )}
         </View>
         <View className="flex-1">
           <View className="flex-row justify-between items-center">

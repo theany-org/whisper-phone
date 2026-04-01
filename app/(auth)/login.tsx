@@ -27,8 +27,9 @@ export default function LoginScreen() {
     try {
       await login(username.trim(), password);
       router.replace("/(chat)");
-    } catch {
-      // error state handled by store
+    } catch (err) {
+      // API errors are displayed via store.error — log unexpected ones in dev
+      if (__DEV__) console.error("[LOGIN] unexpected error", err);
     }
   };
 

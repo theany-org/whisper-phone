@@ -81,6 +81,19 @@ export async function fetchWsTicket(): Promise<string> {
   return data.ticket;
 }
 
+export async function fetchTurnCredentials(): Promise<{
+  urls: string[];
+  username: string;
+  credential: string;
+}> {
+  const { data } = await client.post<{
+    urls: string[];
+    username: string;
+    credential: string;
+  }>("/auth/turn-credentials");
+  return data;
+}
+
 export async function logout(): Promise<void> {
   try {
     await client.post("/auth/logout");

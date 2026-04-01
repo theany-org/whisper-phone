@@ -10,23 +10,23 @@ export interface AuthState {
   isLoading: boolean;
 }
 
-/** Wire format sent/received over WebSocket */
+/** Wire format sent/received over WebSocket (chat messages only) */
 export interface WireMessage {
+  type: "chat_message" | "voice";
   to: string;
   ciphertext: string;
   nonce: string;
   timestamp: number;
-  type?: string;
   duration?: number;
 }
 
-/** Inbound message from server includes `from` instead of `to` */
+/** Inbound chat message from server — includes `from` instead of `to` */
 export interface InboundWireMessage {
+  type: "chat_message" | "voice";
   from: string;
   ciphertext: string;
   nonce: string;
   timestamp: number;
-  type?: string;
   duration?: number;
 }
 
@@ -46,7 +46,7 @@ export interface ChatMessage {
   isMine: boolean;
   status: "sending" | "sent" | "failed";
   replyTo?: ReplyInfo;
-  type?: "text" | "voice";
+  type: "text" | "voice";
   /** Duration in seconds (voice messages only) */
   duration?: number;
   /** Local cache URI for playback (voice, ephemeral — never persisted to DB) */

@@ -6,7 +6,7 @@ import { sendMessage, setMessageHandler } from "@/services/socket";
 import { saveMessage, loadAllMessages } from "@/services/messageDb";
 import { useSettingsStore } from "@/store/settingsStore";
 import { scheduleMessageNotification } from "@/services/notificationService";
-import { readAudioFileAsBytes, writeTempAudioFile } from "@/services/audioService";
+import { readAudioFileAsBytes, writeTempAudioFile, deleteAudioFile } from "@/services/audioService";
 import type { ChatMessage, Conversation, InboundWireMessage, ReplyInfo } from "@/types";
 
 // Always fetch the recipient's current public key from the server.
@@ -37,12 +37,15 @@ interface ChatStore {
   /** Encrypt and send a voice message to `recipient`. */
   sendVoice: (myUsername: string, recipient: string, audioUri: string, duration: number) => Promise<void>;
 
+  /** Re-encrypt and resend a failed message in place (keeps its position in the thread). */
+  resend: (recipient: string, message: ChatMessage) => Promise<void>;
+
   setConnected: (v: boolean) => void;
 
   /** Start a new conversation stub if it doesn't exist. */
   ensureConversation: (username: string) => void;
 
-  /** Clear all in-memory messages and conversations. */
+  /** Clear all in-memory messages and conversations, unregister message handler. */
   reset: () => void;
 }
 
@@ -76,6 +79,10 @@ function describeError(err: unknown): string {
   }
 }
 
+// Kept outside the store so reset() can unsubscribe the current handler
+// regardless of whether the store instance is re-created.
+let _unsubMessageHandler: (() => void) | null = null;
+
 export const useChatStore = create<ChatStore>((set, get) => ({
   messages: {},
   conversations: [],
@@ -97,7 +104,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
     }
 
-    setMessageHandler(async (wire: InboundWireMessage) => {
+    // Unsubscribe any previous handler before registering a new one.
+    // This prevents stale myUsername closures if the user logs out and
+    // back in as a different account in the same session.
+    _unsubMessageHandler?.();
+
+    _unsubMessageHandler = setMessageHandler(async (wire: InboundWireMessage) => {
       try {
         const senderPub = await getPublicKey(wire.from);
         const msgId = makeId();
@@ -199,6 +211,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       from: myUsername,
       to: recipient,
       text: plaintext,
+      type: "text",
       timestamp: ts,
       isMine: true,
       status: "sending",
@@ -220,35 +233,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
 
     try {
-      console.log("[CHAT_SEND] start", {
-        from: myUsername,
-        to: recipient,
-        textLength: plaintext.length,
-        tempId,
-      });
-
       const recipientPub = await getPublicKey(recipient);
-      console.log("[CHAT_SEND] recipient public key fetched", {
-        to: recipient,
-        publicKeyLength: recipientPub.length,
-      });
 
-      console.log("[CHAT_SEND] encrypt start", { to: recipient, tempId });
       // Wrap as JSON so reply metadata is encrypted alongside the text
       const payload = replyTo
         ? JSON.stringify({ text: plaintext, replyTo })
         : plaintext;
       const { ciphertext, nonce } = await encryptMessage(payload, recipientPub);
-      console.log("[CHAT_SEND] encrypt success", {
-        to: recipient,
-        ciphertextLength: ciphertext.length,
-        nonceLength: nonce.length,
-        tempId,
-      });
 
-      console.log("[CHAT_SEND] ws send start", { to: recipient, tempId, timestamp: ts });
-      sendMessage({ to: recipient, ciphertext, nonce, timestamp: ts });
-      console.log("[CHAT_SEND] ws send success", { to: recipient, tempId });
+      sendMessage({ type: "chat_message", to: recipient, ciphertext, nonce, timestamp: ts });
 
       // Mark sent
       set((state) => {
@@ -265,21 +258,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           lastTimestamp: ts,
         });
 
-
         return { messages: { ...state.messages, [recipient]: msgs }, conversations: convs };
       });
-
       if (useSettingsStore.getState().localPersistence) {
         const sentMsg = { ...optimistic, status: "sent" as const };
         saveMessage(recipient, sentMsg).catch(() => {});
       }
     } catch (err) {
-      console.error("[CHAT_SEND] failed", {
-        from: myUsername,
-        to: recipient,
-        tempId,
-        error: describeError(err),
-      });
+      console.error("[CHAT_SEND] failed", { to: recipient, error: describeError(err) });
 
       // Mark failed
       set((state) => {
@@ -320,19 +306,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       };
     });
 
+    if (useSettingsStore.getState().localPersistence) {
+      saveMessage(recipient, optimistic).catch(() => {});
+    }
+
     try {
-      const recipientPub = await getPublicKey(recipient);
-      const audioBytes = await readAudioFileAsBytes(audioUri);
+      const [recipientPub, audioBytes] = await Promise.all([
+        getPublicKey(recipient),
+        readAudioFileAsBytes(audioUri),
+      ]);
       const { ciphertext, nonce } = await encryptBytes(audioBytes, recipientPub);
 
-      sendMessage({ to: recipient, type: "voice", ciphertext, nonce, duration, timestamp: ts });
+      sendMessage({ type: "voice", to: recipient, ciphertext, nonce, duration, timestamp: ts });
 
       set((state) => {
         const msgs = (state.messages[recipient] ?? []).map((m) =>
           m.id === tempId ? { ...m, status: "sent" as const } : m
         );
         const convs = state.conversations.filter((c) => c.username !== recipient);
-        convs.unshift({ username: recipient, lastMessage: "🎤 Voice message", lastTimestamp: ts });
+        convs.unshift({ username: recipient, lastMessage: messagePreview(optimistic), lastTimestamp: ts });
         return { messages: { ...state.messages, [recipient]: msgs }, conversations: convs };
       });
 
@@ -348,6 +340,66 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         );
         return { messages: { ...state.messages, [recipient]: msgs } };
       });
+
+      if (useSettingsStore.getState().localPersistence) {
+        const failedMsg = { ...optimistic, status: "failed" as const };
+        saveMessage(recipient, failedMsg).catch(() => {});
+      }
+    }
+  },
+
+  resend: async (recipient, message) => {
+    set((state) => {
+      const msgs = (state.messages[recipient] ?? []).map((m) =>
+        m.id === message.id ? { ...m, status: "sending" as const } : m
+      );
+      return { messages: { ...state.messages, [recipient]: msgs } };
+    });
+
+    if (useSettingsStore.getState().localPersistence) {
+      saveMessage(recipient, { ...message, status: "sending" }).catch(() => {});
+    }
+
+    try {
+      if (message.type === "voice") {
+        if (!message.audioUri) throw new Error("Audio file unavailable — record a new message");
+        const [recipientPub, audioBytes] = await Promise.all([
+          getPublicKey(recipient),
+          readAudioFileAsBytes(message.audioUri),
+        ]);
+        const { ciphertext, nonce } = await encryptBytes(audioBytes, recipientPub);
+        sendMessage({ type: "voice", to: recipient, ciphertext, nonce, duration: message.duration, timestamp: message.timestamp });
+      } else {
+        const recipientPub = await getPublicKey(recipient);
+        const payload = message.replyTo
+          ? JSON.stringify({ text: message.text, replyTo: message.replyTo })
+          : message.text;
+        const { ciphertext, nonce } = await encryptMessage(payload, recipientPub);
+        sendMessage({ type: "chat_message", to: recipient, ciphertext, nonce, timestamp: message.timestamp });
+      }
+
+      set((state) => {
+        const msgs = (state.messages[recipient] ?? []).map((m) =>
+          m.id === message.id ? { ...m, status: "sent" as const } : m
+        );
+        return { messages: { ...state.messages, [recipient]: msgs } };
+      });
+
+      if (useSettingsStore.getState().localPersistence) {
+        saveMessage(recipient, { ...message, status: "sent" }).catch(() => {});
+      }
+    } catch (err) {
+      console.error("[CHAT_RESEND] failed", { to: recipient, error: describeError(err) });
+      set((state) => {
+        const msgs = (state.messages[recipient] ?? []).map((m) =>
+          m.id === message.id ? { ...m, status: "failed" as const } : m
+        );
+        return { messages: { ...state.messages, [recipient]: msgs } };
+      });
+
+      if (useSettingsStore.getState().localPersistence) {
+        saveMessage(recipient, { ...message, status: "failed" }).catch(() => {});
+      }
     }
   },
 
@@ -365,5 +417,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     });
   },
 
-  reset: () => set({ messages: {}, conversations: [] }),
+  reset: () => {
+    // Unregister the message handler so stale closures don't process
+    // messages after logout (e.g. if the socket briefly stays open).
+    _unsubMessageHandler?.();
+    _unsubMessageHandler = null;
+
+    // Delete cached voice audio files to free disk space on logout.
+    const { messages } = get();
+    for (const msgs of Object.values(messages)) {
+      for (const msg of msgs) {
+        if (msg.audioUri) deleteAudioFile(msg.audioUri);
+      }
+    }
+
+    set({ messages: {}, conversations: [] });
+  },
 }));
