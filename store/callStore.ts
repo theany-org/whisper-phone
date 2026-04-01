@@ -223,8 +223,6 @@ export const useCallStore = create<CallStore>((set, get) => ({
   },
 
   reset: () => {
-    _callHandlerUnsubs.forEach((u) => u());
-    _callHandlerUnsubs = [];
     set({
       status: "idle",
       callId: null,

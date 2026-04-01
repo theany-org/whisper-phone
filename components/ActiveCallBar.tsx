@@ -1,5 +1,5 @@
 import { Pressable, Text, View } from "react-native";
-import { router, usePathname } from "expo-router";
+import { router, useSegments } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCallStore } from "@/store/callStore";
@@ -13,12 +13,13 @@ export default function ActiveCallBar() {
   const status = useCallStore((s) => s.status);
   const peerUsername = useCallStore((s) => s.peerUsername);
   const endCall = useCallStore((s) => s.endCall);
-  const pathname = usePathname();
+  const segments = useSegments();
   const insets = useSafeAreaInsets();
 
-  // Only show when there is an active call AND the call screen is not visible
-  const isOnCallScreen = pathname.startsWith("/(call)") || pathname.includes("/(call)/");
-  if (status === "idle" || isOnCallScreen) return null;
+  // Only show when there is an active call AND the call screen is not visible.
+  // useSegments() preserves route group names (unlike usePathname), so
+  // "(call)" is reliably present when the call screen is active.
+  if (status === "idle" || segments.includes("(call)" as never)) return null;
 
   const label =
     status === "outgoing"   ? `Calling ${peerUsername}…` :
